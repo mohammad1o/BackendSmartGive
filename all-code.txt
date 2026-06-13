@@ -1,0 +1,1304 @@
+========================================================
+FILE: .env
+========================================================
+PORT=5000 # Backend server port
+NODE_ENV=development # Application environment (development/production)
+MONGO_URI=mongodb+srv://SmartGive:Admin0594055376@cluster0.aum8pbi.mongodb.net/SmartGive?retryWrites=true&w=majority
+JWT_SECRET=your_jwt_secret_key_here # Secret key for JWT token signing
+
+
+========================================================
+FILE: .env.example
+========================================================
+PORT=5000 # Backend server port
+NODE_ENV=development # Application environment (development/production)
+MONGO_URI=mongodb+srv://SmartGive:<db_password>@cluster0.aum8pbi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0 # MongoDB Atlas connection string
+JWT_SECRET=your_jwt_secret_key_here # Secret key for JWT token signing
+
+
+========================================================
+FILE: .gitignore
+========================================================
+node_modules/
+.env
+
+
+========================================================
+FILE: package.json
+========================================================
+{
+  "name": "backendsmartgive",
+  "version": "1.0.0",
+  "description": "this is Back-end for project SmartGive",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohammad1o/BackendSmartGive.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/mohammad1o/BackendSmartGive/issues"
+  },
+  "homepage": "https://github.com/mohammad1o/BackendSmartGive#readme",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
+
+
+========================================================
+FILE: README.md
+========================================================
+# BackendSmartGive
+this is Back-end for project SmartGive
+
+
+========================================================
+FILE: server.js
+========================================================
+const express = require('express');
+const dotenv = require('dotenv');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const connectDB = require('./config/db');
+
+dotenv.config();
+
+const app = express();
+
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+
+app.use(cors({
+  origin: corsOrigin,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type']
+}));
+
+app.use(express.json());
+app.use(cookieParser());
+
+app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/items', require('./routes/itemRoutes'));
+app.use('/api/requests', require('./routes/requestRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/messages', require('./routes/messageRoutes'));
+app.use('/api/admin', require('./routes/adminRoutes'));
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found'
+  });
+});
+
+app.use((err, req, res, next) => {
+  const status = err.status || 500;
+
+  console.error(`[${status}] ${err.message}`);
+
+  res.status(status).json({
+    success: false,
+    message:
+      process.env.NODE_ENV === 'production'
+        ? 'Internal Server Error'
+        : err.message,
+    ...(process.env.NODE_ENV === 'development' && {
+      stack: err.stack
+    })
+  });
+});
+
+const PORT = process.env.PORT || 5000;
+
+const startServer = async () => {
+  try {
+    await connectDB();
+
+    app.listen(PORT, () => {
+      console.log(
+        `Server running in ${
+          process.env.NODE_ENV || 'development'
+        } mode on port ${PORT}`
+      );
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error.message);
+    process.exit(1);
+  }
+};
+
+startServer();
+
+
+========================================================
+FILE: config/db.js
+========================================================
+const mongoose = require('mongoose');
+
+const connectDB = async () => {
+  try {
+    if (!process.env.MONGO_URI) { // Check if connection string is configured
+      throw new Error('MONGO_URI is not defined in environment variables');
+    }
+
+    const conn = await mongoose.connect(process.env.MONGO_URI); // Connect to MongoDB
+
+    console.log(`MongoDB Connected: ${conn.connection.host}/${conn.connection.name}`); // Log host and database name
+  } catch (error) {
+    console.error('MongoDB connection error:', error.message); // Log connection failure
+    process.exit(1); // Exit process if DB cannot be reached
+  }
+};
+
+module.exports = connectDB; 
+
+
+========================================================
+FILE: controllers/adminController.js
+========================================================
+const User = require('../models/User');
+const Item = require('../models/Item');
+const Request = require('../models/Request');
+
+const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find().select('-password').sort('-createdAt');
+    res.status(200).json({ success: true, count: users.length, users });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.role === 'admin') return res.status(400).json({ success: false, message: 'Cannot delete admin users' });
+
+    await Item.deleteMany({ owner: user._id });
+    await Request.deleteMany({ $or: [{ requester: user._id }, { item: { $in: (await Item.find({ owner: user._id })).map(i => i._id) } }] });
+    await user.deleteOne();
+
+    res.status(200).json({ success: true, message: 'User and all associated data deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getAllItems = async (req, res) => {
+  try {
+    const items = await Item.find().populate('owner', 'name email').sort('-createdAt');
+    res.status(200).json({ success: true, count: items.length, items });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteAnyItem = async (req, res) => {
+  try {
+    const item = await Item.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+    await item.deleteOne();
+    res.status(200).json({ success: true, message: 'Item deleted by admin' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getAllRequests = async (req, res) => {
+  try {
+    const requests = await Request.find()
+      .populate('item', 'title')
+      .populate('requester', 'name email')
+      .sort('-createdAt');
+    res.status(200).json({ success: true, count: requests.length, requests });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { getAllUsers, deleteUser, getAllItems, deleteAnyItem, getAllRequests };
+
+
+========================================================
+FILE: controllers/authController.js
+========================================================
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+const cookieOptions = {
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/'
+};
+
+const generateToken = (userId) => {
+  return jwt.sign(
+    { id: userId },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+};
+
+const sendTokenCookie = (res, user, statusCode) => {
+  const token = generateToken(user._id);
+
+  res.cookie('token', token, cookieOptions);
+
+  res.status(statusCode).json({
+    success: true,
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role
+    }
+  });
+};
+
+const register = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'All fields are required'
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters'
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const existingUser = await User.findOne({
+      email: normalizedEmail
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already registered'
+      });
+    }
+
+    const user = await User.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      password
+    });
+
+    sendTokenCookie(res, user, 201);
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Registration failed'
+    });
+  }
+};
+
+const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required'
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await User.findOne({
+      email: normalizedEmail
+    }).select('+password');
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
+    }
+
+    const isMatch = await user.comparePassword(password);
+
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
+    }
+
+    sendTokenCookie(res, user, 200);
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Login failed'
+    });
+  }
+};
+
+const logout = async (req, res) => {
+  try {
+
+    res.clearCookie('token', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/'
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Logout failed'
+    });
+  }
+};
+
+const getMe = async (req, res) => {
+  try {
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch user profile'
+    });
+  }
+};
+
+module.exports = {
+  register,
+  login,
+  logout,
+  getMe
+};
+
+
+========================================================
+FILE: controllers/itemController.js
+========================================================
+const Item = require('../models/Item');
+
+const createItem = async (req, res) => {
+  try {
+    req.body.owner = req.user._id;
+    const item = await Item.create(req.body);
+    res.status(201).json({ success: true, item });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+const getItems = async (req, res) => {
+  try {
+    const { category, condition, status, search } = req.query;
+    const filter = { status: 'available' };
+
+    if (category) filter.category = category;
+    if (condition) filter.condition = condition;
+    if (status) filter.status = status;
+    if (search) {
+        filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+        ];
+}
+    const items = await Item.find(filter).populate('owner', 'name email').sort('-createdAt');
+    res.status(200).json({ success: true, count: items.length, items });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getItem = async (req, res) => {
+  try {
+    const item = await Item.findById(req.params.id).populate('owner', 'name email');
+    if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+    res.status(200).json({ success: true, item });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getUserItems = async (req, res) => {
+  try {
+    const items = await Item.find({ owner: req.user._id }).sort('-createdAt');
+    res.status(200).json({ success: true, count: items.length, items });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateItem = async (req, res) => {
+  try {
+    let item = await Item.findById(req.params.id);
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found'
+      });
+    }
+
+    if (
+      item.owner.toString() !== req.user._id.toString() &&
+      req.user.role !== 'admin'
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this item'
+      });
+    }
+
+    delete req.body.owner;
+    delete req.body.reservedBy;
+
+    item = await Item.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      {
+        new: true,
+        runValidators: true
+      }
+    );
+
+    res.status(200).json({
+      success: true,
+      item
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+const deleteItem = async (req, res) => {
+  try {
+    const item = await Item.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+
+    if (item.owner.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized to delete this item' });
+    }
+
+    await item.deleteOne();
+    res.status(200).json({ success: true, message: 'Item deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { createItem, getItems, getItem, getUserItems, updateItem, deleteItem };
+
+
+========================================================
+FILE: controllers/messageController.js
+========================================================
+const Message = require('../models/Message');
+const Notification = require('../models/Notification');
+
+const sendMessage = async (req, res) => {
+  try {
+    const { receiver, item, content } = req.body;
+    if (!receiver || !content) return res.status(400).json({ success: false, message: 'Receiver and content are required' });
+
+    const message = await Message.create({ sender: req.user._id, receiver, item, content });
+
+    await Notification.create({
+      recipient: receiver,
+      type: 'message_received',
+      message: `${req.user.name} sent you a message`,
+      relatedItem: item
+    });
+
+    res.status(201).json({ success: true, message });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getConversation = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const messages = await Message.find({
+      $or: [
+        { sender: req.user._id, receiver: userId },
+        { sender: userId, receiver: req.user._id }
+      ]
+    }).populate('sender', 'name').populate('receiver', 'name').sort('createdAt');
+
+    res.status(200).json({ success: true, count: messages.length, messages });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getMyConversations = async (req, res) => {
+  try {
+    const messages = await Message.find({
+      $or: [{ sender: req.user._id }, { receiver: req.user._id }]
+    }).populate('sender', 'name').populate('receiver', 'name').sort('-createdAt');
+
+    const seen = new Set();
+    const conversations = messages.filter(m => {
+      const otherId = m.sender._id.toString() === req.user._id.toString() ? m.receiver._id.toString() : m.sender._id.toString();
+      if (seen.has(otherId)) return false;
+      seen.add(otherId);
+      return true;
+    });
+
+    res.status(200).json({ success: true, count: conversations.length, conversations });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { sendMessage, getConversation, getMyConversations };
+
+
+========================================================
+FILE: controllers/notificationController.js
+========================================================
+const Notification = require('../models/Notification');
+
+const getMyNotifications = async (req, res) => {
+  try {
+    const notifications = await Notification.find({ recipient: req.user._id })
+      .sort('-createdAt')
+      .populate('relatedItem', 'title');
+    res.status(200).json({ success: true, count: notifications.length, notifications });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getUnreadCount = async (req, res) => {
+  try {
+    const count = await Notification.countDocuments({ recipient: req.user._id, read: false });
+    res.status(200).json({ success: true, count });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const markAsRead = async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id);
+    if (!notification) return res.status(404).json({ success: false, message: 'Notification not found' });
+    if (notification.recipient.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    notification.read = true;
+    await notification.save();
+    res.status(200).json({ success: true, notification });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const markAllAsRead = async (req, res) => {
+  try {
+    await Notification.updateMany({ recipient: req.user._id, read: false }, { read: true });
+    res.status(200).json({ success: true, message: 'All notifications marked as read' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { getMyNotifications, getUnreadCount, markAsRead, markAllAsRead };
+
+
+========================================================
+FILE: controllers/requestController.js
+========================================================
+const Request = require('../models/Request');
+const Item = require('../models/Item');
+const Notification = require('../models/Notification');
+
+const createRequest = async (req, res) => {
+  try {
+    const { itemId, message } = req.body;
+
+    const item = await Item.findById(itemId);
+    if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+    if (item.status !== 'available') return res.status(400).json({ success: false, message: 'Item is not available' });
+    if (item.owner.toString() === req.user._id.toString()) {
+      return res.status(400).json({ success: false, message: 'Cannot request your own item' });
+    }
+
+    const existing = await Request.findOne({ item: itemId, requester: req.user._id, status: 'pending' });
+    if (existing) return res.status(400).json({ success: false, message: 'You already have a pending request for this item' });
+
+    const request = await Request.create({ item: itemId, requester: req.user._id, message });
+
+    await Notification.create({
+      recipient: item.owner,
+      type: 'request_received',
+      message: `${req.user.name} wants your item: ${item.title}`,
+      relatedItem: item._id,
+      relatedRequest: request._id
+    });
+
+    res.status(201).json({ success: true, request });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getUserRequests = async (req, res) => {
+  try {
+    const requests = await Request.find({ requester: req.user._id })
+      .populate('item', 'title images status')
+      .populate('requester', 'name email')
+      .sort('-createdAt');
+    res.status(200).json({ success: true, count: requests.length, requests });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getItemRequests = async (req, res) => {
+  try {
+    const item = await Item.findById(req.params.itemId);
+    if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+    if (item.owner.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const requests = await Request.find({ item: req.params.itemId })
+      .populate('requester', 'name email')
+      .sort('-createdAt');
+    res.status(200).json({ success: true, count: requests.length, requests });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const acceptRequest = async (req, res) => {
+  try {
+    const request = await Request.findById(req.params.id).populate('item').populate('requester', 'name');
+    if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+    if (request.item.owner.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (request.status !== 'pending') return res.status(400).json({ success: false, message: 'Request is already ' + request.status });
+
+    request.status = 'accepted';
+    await request.save();
+
+    request.item.status = 'reserved';
+    await request.item.save();
+
+    await Request.updateMany(
+      { item: request.item._id, _id: { $ne: request._id }, status: 'pending' },
+      { status: 'rejected' }
+    );
+
+    const rejectedRequests = await Request.find({ item: request.item._id, _id: { $ne: request._id }, status: 'rejected' });
+
+    await Notification.create({
+      recipient: request.requester._id,
+      type: 'request_accepted',
+      message: `Your request for "${request.item.title}" was accepted`,
+      relatedItem: request.item._id,
+      relatedRequest: request._id
+    });
+
+    for (const rejected of rejectedRequests) {
+      const rejectedRequester = await require('../models/User').findById(rejected.requester);
+      if (rejectedRequester) {
+        await Notification.create({
+          recipient: rejected.requester,
+          type: 'request_rejected',
+          message: `Your request for "${request.item.title}" was rejected because the item is now reserved`,
+          relatedItem: request.item._id,
+          relatedRequest: rejected._id
+        });
+      }
+    }
+
+    res.status(200).json({ success: true, request });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const rejectRequest = async (req, res) => {
+  try {
+    const request = await Request.findById(req.params.id).populate('item').populate('requester', 'name');
+    if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+    if (request.item.owner.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (request.status !== 'pending') return res.status(400).json({ success: false, message: 'Request is already ' + request.status });
+
+    request.status = 'rejected';
+    await request.save();
+
+    await Notification.create({
+      recipient: request.requester._id,
+      type: 'request_rejected',
+      message: `Your request for "${request.item.title}" was rejected`,
+      relatedItem: request.item._id,
+      relatedRequest: request._id
+    });
+
+    res.status(200).json({ success: true, request });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const cancelRequest = async (req, res) => {
+  try {
+    const request = await Request.findById(req.params.id);
+    if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+    if (request.requester.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (request.status !== 'pending') return res.status(400).json({ success: false, message: 'Cannot cancel a ' + request.status + ' request' });
+
+    request.status = 'cancelled';
+    await request.save();
+
+    res.status(200).json({ success: true, request });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const markGiven = async (req, res) => {
+  try {
+    const request = await Request.findById(req.params.id).populate('item');
+    if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+    if (request.item.owner.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (request.status !== 'accepted') return res.status(400).json({ success: false, message: 'Request must be accepted first' });
+
+    request.status = 'given';
+    await request.save();
+
+    request.item.status = 'given';
+    await request.item.save();
+
+    await Notification.create({
+      recipient: request.requester,
+      type: 'item_given',
+      message: `The item "${request.item.title}" has been marked as given to you`,
+      relatedItem: request.item._id,
+      relatedRequest: request._id
+    });
+
+    res.status(200).json({ success: true, request });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { createRequest, getUserRequests, getItemRequests, acceptRequest, rejectRequest, cancelRequest, markGiven };
+
+
+========================================================
+FILE: middleware/authMiddleware.js
+========================================================
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+const protect = async (req, res, next) => {
+  try {
+
+    const token = req.cookies?.token;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Not authorized, no token provided'
+      });
+    }
+
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
+
+    const user = await User.findById(decoded.id)
+      .select('-password');
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Not authorized, user not found'
+      });
+    }
+
+    req.user = user;
+
+    next();
+
+  } catch (error) {
+
+    return res.status(401).json({
+      success: false,
+      message: 'Not authorized, invalid or expired token'
+    });
+
+  }
+};
+
+const authorize = (...roles) => {
+  return (req, res, next) => {
+
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized for this action'
+      });
+    }
+
+    next();
+  };
+};
+
+module.exports = {
+  protect,
+  authorize
+};
+
+
+========================================================
+FILE: models/Item.js
+========================================================
+const mongoose = require('mongoose');
+
+const itemSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: [true, 'Title is required'],
+    trim: true,
+    maxlength: [100, 'Title cannot exceed 100 characters']
+  },
+
+  description: {
+    type: String,
+    required: [true, 'Description is required'],
+    trim: true,
+    maxlength: [2000, 'Description cannot exceed 2000 characters']
+  },
+
+  location: {
+    type: String,
+    required: [true, 'Location is required'],
+    trim: true
+  },
+
+  images: [{
+    type: String
+  }],
+
+  category: {
+    type: String,
+    required: [true, 'Category is required'],
+    enum: [
+      'clothing',
+      'electronics',
+      'furniture',
+      'books',
+      'toys',
+      'sports',
+      'food',
+      'other'
+    ]
+  },
+
+  condition: {
+    type: String,
+    required: [true, 'Condition is required'],
+    enum: ['new', 'like-new', 'good', 'fair', 'poor']
+  },
+
+  status: {
+    type: String,
+    enum: ['available', 'reserved', 'given'],
+    default: 'available'
+  },
+
+  owner: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'Owner is required']
+  },
+
+  reservedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  }
+
+}, {
+  timestamps: true
+});
+
+module.exports = mongoose.model('Item', itemSchema);
+
+
+========================================================
+FILE: models/Message.js
+========================================================
+const mongoose = require('mongoose');
+
+const messageSchema = new mongoose.Schema({
+  sender: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'Sender is required']
+  },
+  receiver: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'Receiver is required']
+  },
+  item: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Item'
+  },
+  content: {
+    type: String,
+    required: [true, 'Message content is required'],
+    trim: true,
+    maxlength: [1000, 'Message cannot exceed 1000 characters']
+  }
+}, {
+  timestamps: true
+});
+
+module.exports = mongoose.model('Message', messageSchema);
+
+
+========================================================
+FILE: models/Notification.js
+========================================================
+const mongoose = require('mongoose');
+
+const notificationSchema = new mongoose.Schema({
+  recipient: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'Recipient is required'],
+    index: true
+  },
+  type: {
+    type: String,
+    required: true,
+    enum: [
+      'request_received',
+      'request_accepted',
+      'request_rejected',
+      'item_reserved',
+      'item_given',
+      'message_received'
+    ]
+  },
+  message: {
+    type: String,
+    required: [true, 'Message is required']
+  },
+  relatedItem: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Item'
+  },
+  relatedRequest: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Request'
+  },
+  read: {
+    type: Boolean,
+    default: false
+  }
+}, {
+  timestamps: true
+});
+
+module.exports = mongoose.model('Notification', notificationSchema);
+
+
+========================================================
+FILE: models/Request.js
+========================================================
+const mongoose = require('mongoose');
+
+const requestSchema = new mongoose.Schema({
+  item: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Item',
+    required: [true, 'Item is required']
+  },
+  requester: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: [true, 'Requester is required']
+  },
+  message: {
+    type: String,
+    trim: true,
+    maxlength: [500, 'Message cannot exceed 500 characters'],
+    default: ''
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'accepted', 'rejected', 'cancelled'],
+    default: 'pending'
+  }
+}, {
+  timestamps: true
+});
+
+module.exports = mongoose.model('Request', requestSchema);
+
+
+========================================================
+FILE: models/User.js
+========================================================
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const userSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: [true, 'Name is required'],
+      trim: true
+    },
+
+    email: {
+      type: String,
+      required: [true, 'Email is required'],
+      unique: true,
+      index: true,
+      lowercase: true,
+      trim: true,
+      match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email']
+    },
+
+    password: {
+      type: String,
+      required: [true, 'Password is required'],
+      minlength: [6, 'Password must be at least 6 characters'],
+      select: false
+    },
+
+    phone: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user'
+    }
+  },
+  {
+    timestamps: true
+  }
+);
+
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
+
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+});
+
+userSchema.methods.comparePassword = async function (candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+userSchema.set('toJSON', {
+  transform: (doc, ret) => {
+    delete ret.password;
+    delete ret.__v;
+
+    return ret;
+  }
+});
+
+module.exports = mongoose.model('User', userSchema);
+
+
+========================================================
+FILE: routes/adminRoutes.js
+========================================================
+const router = require('express').Router();
+const { protect, authorize } = require('../middleware/authMiddleware');
+const { getAllUsers, deleteUser, getAllItems, deleteAnyItem, getAllRequests } = require('../controllers/adminController');
+
+router.use(protect, authorize('admin'));
+
+router.get('/users', getAllUsers);
+router.delete('/users/:id', deleteUser);
+router.get('/items', getAllItems);
+router.delete('/items/:id', deleteAnyItem);
+router.get('/requests', getAllRequests);
+
+module.exports = router;
+
+
+========================================================
+FILE: routes/authRoutes.js
+========================================================
+const router = require('express').Router();
+
+const {
+  register,
+  login,
+  logout,
+  getMe
+} = require('../controllers/authController');
+
+const { protect } = require('../middleware/authMiddleware');
+
+router.post('/register', register);
+router.post('/login', login);
+
+router.post('/logout', logout);
+
+router.get('/me', protect, getMe);
+
+module.exports = router;
+
+
+========================================================
+FILE: routes/itemRoutes.js
+========================================================
+const router = require('express').Router();
+const { protect } = require('../middleware/authMiddleware');
+const { createItem, getItems, getItem, getUserItems, updateItem, deleteItem } = require('../controllers/itemController');
+
+router.get('/', getItems);
+router.get('/mine', protect, getUserItems);
+router.get('/:id', getItem);
+router.post('/', protect, createItem);
+router.put('/:id', protect, updateItem);
+router.delete('/:id', protect, deleteItem);
+
+module.exports = router;
+
+
+========================================================
+FILE: routes/messageRoutes.js
+========================================================
+const router = require('express').Router();
+const { protect } = require('../middleware/authMiddleware');
+const { sendMessage, getConversation, getMyConversations } = require('../controllers/messageController');
+
+router.post('/', protect, sendMessage);
+router.get('/', protect, getMyConversations);
+router.get('/:userId', protect, getConversation);
+
+module.exports = router;
+
+
+========================================================
+FILE: routes/notificationRoutes.js
+========================================================
+const router = require('express').Router();
+const { protect } = require('../middleware/authMiddleware');
+const { getMyNotifications, getUnreadCount, markAsRead, markAllAsRead } = require('../controllers/notificationController');
+
+router.get('/', protect, getMyNotifications);
+router.get('/unread', protect, getUnreadCount);
+router.put('/:id/read', protect, markAsRead);
+router.put('/read-all', protect, markAllAsRead);
+
+module.exports = router;
+
+
+========================================================
+FILE: routes/requestRoutes.js
+========================================================
+const router = require('express').Router();
+const { protect } = require('../middleware/authMiddleware');
+const { createRequest, getUserRequests, getItemRequests, acceptRequest, rejectRequest, cancelRequest, markGiven } = require('../controllers/requestController');
+
+router.post('/', protect, createRequest);
+router.get('/mine', protect, getUserRequests);
+router.get('/item/:itemId', protect, getItemRequests);
+router.put('/:id/accept', protect, acceptRequest);
+router.put('/:id/reject', protect, rejectRequest);
+router.put('/:id/cancel', protect, cancelRequest);
+router.put('/:id/given', protect, markGiven);
+
+module.exports = router;
