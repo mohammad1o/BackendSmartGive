@@ -141,20 +141,22 @@ The description MUST be in ${lang}. Return ONLY the JSON.`;
     const cleanText = text.replace(/```json\n?|```\n?/g, '').trim();
     const result = JSON.parse(cleanText);
 
-    // ✅ Get image from Pixabay
+   // ✅ Get image from Pixabay
     let imageDataUrl = null;
 
     try {
       console.log("🖼️ Fetching image from Pixabay...");
       const keyword = encodeURIComponent(result.imageKeyword);
-      const pixabayUrl = `https://pixabay.com/api/?key=${pixabayKey}&q=${keyword}&image_type=photo&per_page=3&safesearch=true`;
+      const pixabayUrl = `https://pixabay.com/api/?key=${pixabayKey}&q=${keyword}&image_type=photo&per_page=20&safesearch=true`;
 
       const pixabayResponse = await fetch(pixabayUrl);
       const pixabayData = await pixabayResponse.json();
 
       if (pixabayData.hits && pixabayData.hits.length > 0) {
-        const imageUrl = pixabayData.hits[0].webformatURL;
-        console.log("📸 Image URL:", imageUrl);
+        // ✅ Pick RANDOM image from results (not always first)
+        const randomIndex = Math.floor(Math.random() * Math.min(pixabayData.hits.length, 10));
+        const imageUrl = pixabayData.hits[randomIndex].webformatURL;
+        console.log(`📸 Image URL (${randomIndex + 1}/${pixabayData.hits.length}):`, imageUrl);
 
         const imageResponse = await fetch(imageUrl);
         if (imageResponse.ok) {
@@ -169,9 +171,6 @@ The description MUST be in ${lang}. Return ONLY the JSON.`;
     } catch (imageError) {
       console.log("⚠️ Image fetch failed:", imageError.message);
     }
-
-    console.log("✅ Generated everything!");
-
     return {
       description: result.description,
       category: result.category,

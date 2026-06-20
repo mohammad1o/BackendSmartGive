@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 
-const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const corsOrigin = process.env.CORS_ORIGIN || 'http://v8j3jw0nm6b5t0rjqa8x7vcc.142.93.162.170.sslip.io/';
 
 // ✅ Middleware FIRST
 app.use(cors({
