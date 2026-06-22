@@ -65,7 +65,7 @@ const register = async (req, res) => {
     }
 
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const verificationCodeExpire = Date.now() + 10 * 60 * 1000;
+    const verificationCodeExpire = Date.now() + 1 * 60 * 1000;
 
     // ✨ Auto-set join date
     const now = new Date();
@@ -361,12 +361,11 @@ const forgotPassword = async (req, res) => {
     const resetToken = crypto.randomBytes(32).toString('hex');
 
     user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-    user.resetPasswordExpire = Date.now() + 15 * 60 * 1000;
+    user.resetPasswordExpire = Date.now() + 1 * 60 * 1000;
 
     await user.save({ validateBeforeSave: false });
 
-    const resetUrl = `http://localhost:5173/reset-password/${resetToken}`;
-
+  const resetUrl = `https://smartgive.salbeh.pw/reset-password/${resetToken}`;
     try {
       await sendResetPasswordEmail(user.email, user.name, resetUrl);
     } catch (emailErr) {
@@ -637,7 +636,7 @@ const resendVerificationCode = async (req, res) => {
     // Generate new code
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
     user.verificationCode = verificationCode;
-    user.verificationCodeExpire = Date.now() + 10 * 60 * 1000;
+    user.verificationCodeExpire = Date.now() + 1 * 60 * 1000;
     await user.save();
 
     // Send email
