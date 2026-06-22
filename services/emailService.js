@@ -1,11 +1,10 @@
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
 
-// ✅ Gmail transporter للمحلي
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
+  port: 465,
+  secure: true, 
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD
@@ -25,12 +24,15 @@ const sendEmail = async (to, subject, html) => {
     });
   } else {
     // Local - Gmail
-    await transporter.sendMail({
-      from: `"SmartGive 💚" <${process.env.EMAIL_USER}>`,
-      to,
-      subject,
-      html
-    });
+    const transporter = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, 
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD
+  }
+});
   }
 };
 
