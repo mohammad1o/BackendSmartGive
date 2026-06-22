@@ -1,8 +1,7 @@
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
+// ✅ Gmail transporter للمحلي
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
@@ -13,10 +12,11 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// ✅ Smart send - Resend for production, Gmail for local
+// ✅ Smart send
 const sendEmail = async (to, subject, html) => {
   if (process.env.RESEND_API_KEY) {
-    // Production - use Resend
+    // Production - Resend
+    const resend = new Resend(process.env.RESEND_API_KEY);
     await resend.emails.send({
       from: 'SmartGive <onboarding@resend.dev>',
       to,
@@ -24,7 +24,7 @@ const sendEmail = async (to, subject, html) => {
       html
     });
   } else {
-    // Local - use Gmail
+    // Local - Gmail
     await transporter.sendMail({
       from: `"SmartGive 💚" <${process.env.EMAIL_USER}>`,
       to,
