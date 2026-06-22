@@ -4,35 +4,29 @@ const { Resend } = require('resend');
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 465,
-  secure: true, 
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD
   }
 });
 
-// ✅ Smart send
 const sendEmail = async (to, subject, html) => {
   if (process.env.RESEND_API_KEY) {
-    // Production - Resend
     const resend = new Resend(process.env.RESEND_API_KEY);
     await resend.emails.send({
-      from: 'SmartGive <onboarding@resend.dev>',
+      from: 'SmartGive <no-reply@smartgive.salbeh.pw>',
       to,
       subject,
       html
     });
   } else {
-    // Local - Gmail
-    const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, 
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
-  }
-});
+    await transporter.sendMail({
+      from: `"SmartGive 💚" <${process.env.EMAIL_USER}>`,
+      to,
+      subject,
+      html
+    });
   }
 };
 
