@@ -17,8 +17,33 @@ const deleteUser = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     if (user.role === 'admin') return res.status(400).json({ success: false, message: 'Cannot delete admin users' });
 
+    const userItems = await Item.find({ owner: user._id }).select('_id');
+    const itemIds = userItems.map(i => i._id);
+
+    await Request.deleteMany({
+      $or: [
+        { requester: user._id },
+        { item: { $in: itemIds } }
+      ]
+    });
+
     await Item.deleteMany({ owner: user._id });
-    await Request.deleteMany({ $or: [{ requester: user._id }, { item: { $in: (await Item.find({ owner: user._id })).map(i => i._id) } }] });
+
+    const Message = require('../models/Message');
+    await Message.deleteMany({
+      $or: [
+        { sender: user._id },
+        { receiver: user._id }
+      ]
+    });
+
+    const Notification = require('../models/Notification');
+    await Notification.deleteMany({
+      $or: [
+        { recipient: user._id }
+      ]
+    });
+
     await user.deleteOne();
 
     res.status(200).json({ success: true, message: 'User and all associated data deleted' });
