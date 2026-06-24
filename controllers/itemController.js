@@ -68,10 +68,12 @@ const getItem = async (req, res) => {
     }
 
     // ✅ Anonymize owner
-    if (item.owner && item.owner.isAnonymous) {
-      item.owner.name = 'Anonymous User';
-      item.owner.avatar = '';
-    }
+    const requesterId = req.user?._id?.toString();
+const ownerId = item.owner?._id?.toString();
+if (item.owner && item.owner.isAnonymous && requesterId !== ownerId) {
+  item.owner.name = 'Anonymous User';
+  item.owner.avatar = '';
+}
 
     res.status(200).json({
       success: true,

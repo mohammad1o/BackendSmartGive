@@ -57,7 +57,7 @@ const createRequest = async (req, res) => {
 const getUserRequests = async (req, res) => {
   try {
     const requests = await Request.find({ requester: req.user._id })
-      .populate('item', 'title images status')
+      .populate('item', 'title images status owner')
       .populate('requester', 'name email')
       .sort('-createdAt');
 
